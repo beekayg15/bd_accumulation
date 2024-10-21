@@ -1,0 +1,1 @@
+## Accumulation without Homomorphism

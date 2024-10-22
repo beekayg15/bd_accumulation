@@ -1,27 +1,27 @@
-
 use std::marker::PhantomData;
 
+use ark_crypto_primitives::crh::poseidon::{TwoToOneCRH, CRH};
+use ark_crypto_primitives::crh::{CRHScheme, TwoToOneCRHScheme};
+use ark_crypto_primitives::merkle_tree::{Config, IdentityDigestConverter, MerkleTree};
 use ark_crypto_primitives::sponge::Absorb;
 use ark_ff::{Field, PrimeField};
 use ark_relations::r1cs::Matrix;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::vec::Vec;
-use ark_crypto_primitives::merkle_tree::{MerkleTree, Config};
-use ark_crypto_primitives::crh::poseidon::{CRH,TwoToOneCRH};
-use ark_crypto_primitives::crh::{CRHScheme,TwoToOneCRHScheme};
 
-struct MerkleHashConfig<F:PrimeField> {
-    _field_data: PhantomData<F>
+pub struct MerkleHashConfig<F: PrimeField> {
+    _field_data: PhantomData<F>,
 }
-type LeafH<F> = CRH<F>;
-impl<F:PrimeField + Absorb> Config for MerkleHashConfig<F> {
-    type Leaf = F;
 
-    type LeafHash = <LeafH<F>::Output;
-
-
-
-} 
+type CompressH<F> = TwoToOneCRH<F>;
+impl<F: PrimeField + Absorb> Config for MerkleHashConfig<F> {
+    type Leaf = [F];
+    type LeafHash = CRH<F>;
+    type LeafDigest = <CRH<F> as CRHScheme>::Output;
+    type InnerDigest = <TwoToOneCRH<F> as TwoToOneCRHScheme>::Output;
+    type LeafInnerDigestConverter = IdentityDigestConverter<Self::LeafDigest>;
+    type TwoToOneHash = TwoToOneCRH<F>;
+}
 
 /// dummy for public params
 pub type PublicParameters = ();
@@ -76,27 +76,26 @@ impl<F: Field> FullAssignment<F> {
 //     }
 // }
 
-#[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Clone)]
 /// commitment to the full (input,witness) vec (Merkle root)
-pub struct CommitmentFullAssignment<F: Field> {
-    pub(crate) blinded_assignment: Vec<F>, // commitment to full assignment merkle root for tree
-                                           // with leaves = (input,witness)?
+pub struct CommitmentFullAssignment<F: PrimeField + Absorb> {
+    pub(crate) blinded_assignment: MerkleTree<MerkleHashConfig<F>>, // commitment to full assignment merkle root for tree
+                                                                    // with leaves = (input,witness)?
 }
 
-impl<F: Field> CommitmentFullAssignment<F> {
-    // pub(crate) fn zero(witness_len: usize) -> Self {
-    //     Self {
-    //         blinded_assignment: vec![F::zero(); witness_len],
-    //     }
-    // }
-}
+// impl<F: Field> CommitmentFullAssignment<F> {
+//     // pub(crate) fn zero(witness_len: usize) -> Self {
+//     //     Self {
+//     //         blinded_assignment: vec![F::zero(); witness_len],
+//     //     }
+//     // }
+// }
 
 /// a proof for a given circuit f with (input,witness) and merkle root of the same
-#[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
-pub struct Proof<F: Field> {
+#[derive(Clone)]
+pub struct Proof<F: PrimeField + Absorb> {
     ///(input, witness)
     pub instance: FullAssignment<F>,
     ///merkle root for (input, witness),
     pub witness: CommitmentFullAssignment<F>,
 }
-

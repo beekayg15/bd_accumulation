@@ -1,3 +1,5 @@
+use ark_crypto_primitives::merkle_tree::MerkleTree;
+use ark_crypto_primitives::sponge::Absorb;
 use ark_ff::Field;
 use ark_ff::PrimeField;
 use ark_relations::r1cs::{
@@ -8,25 +10,19 @@ use ark_std::rand::RngCore;
 use ark_std::vec::Vec;
 use ark_std::{cfg_into_iter, marker::PhantomData};
 
-
 mod data_structures;
+mod poseidon_config;
 pub use data_structures::*;
 
 type R1CSResult<T> = Result<T, SynthesisError>;
 pub(crate) const _CHALLENGE_SIZE: usize = 128;
 
 ///This is the proof for any x_{i+1} = f(x_i)
-pub struct R1CSNark<F>
-where
-F: PrimeField
-{
+pub struct R1CSNark<F: PrimeField + Absorb> {
     _field: PhantomData<F>,
 }
 
-impl<F> R1CSNark<F>
-where
-F: PrimeField
-{
+impl<F: PrimeField + Absorb> R1CSNark<F> {
     /// generates public params
     pub fn setup() -> PublicParameters {}
     /// generates index prover key and verifier key
@@ -103,11 +99,19 @@ F: PrimeField
         assert_eq!(ipk.index_info.num_constraints, num_constraints);
 
         let full_assgn = FullAssignment {
-            input,
+            input: input.clone(),
             witness: witness.clone(),
         };
-
-        let blinded_witness = witness; // Replace with finding merkle root for (input||witness)
+        let mut inp_wit: Vec<[F; 1]> = vec![];
+        for i in input.iter() {
+            inp_wit.push([i.clone()]);
+        }
+        for i in witness.iter() {
+            inp_wit.push([i.clone()]);
+        }
+        let hash_params = poseidon_config::poseidon_parameters::<F>();
+        let blinded_witness =   // Replace with finding merkle root for (input||witness)
+        MerkleTree::<MerkleHashConfig<F>>::new(&hash_params, &hash_params, inp_wit).unwrap();
 
         let commit_full_assgn = CommitmentFullAssignment {
             blinded_assignment: blinded_witness,
@@ -120,15 +124,10 @@ F: PrimeField
         Ok(proof)
     }
     /// verifies a given proof and input using index verifier key
-    pub fn verify(
-        ivk: &IndexVerifierKey<F>,
-        input: &[F],
-        proof: &Proof<F>,
-    ) -> bool {
+    pub fn verify(ivk: &IndexVerifierKey<F>, input: &[F], proof: &Proof<F>) -> bool {
         let a_times_input_witness = matrix_vec_mul(&ivk.a, &input, &proof.instance.witness);
         let b_times_input_witness = matrix_vec_mul(&ivk.b, &input, &proof.instance.witness);
         let c_times_input_witness = matrix_vec_mul(&ivk.c, &input, &proof.instance.witness);
-
 
         // let mut comm_a = proof.first_msg.comm_a.into_projective();
         // let mut comm_b = proof.first_msg.comm_b.into_projective();
@@ -206,4 +205,3 @@ fn inner_prod<F: Field>(row: &[(F, usize)], input: &[F], witness: &[F]) -> F {
     }
     acc
 }
-

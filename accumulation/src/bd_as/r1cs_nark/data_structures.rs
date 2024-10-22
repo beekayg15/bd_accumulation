@@ -1,8 +1,27 @@
 
+use std::marker::PhantomData;
+
+use ark_crypto_primitives::sponge::Absorb;
 use ark_ff::{Field, PrimeField};
 use ark_relations::r1cs::Matrix;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::vec::Vec;
+use ark_crypto_primitives::merkle_tree::{MerkleTree, Config};
+use ark_crypto_primitives::crh::poseidon::{CRH,TwoToOneCRH};
+use ark_crypto_primitives::crh::{CRHScheme,TwoToOneCRHScheme};
+
+struct MerkleHashConfig<F:PrimeField> {
+    _field_data: PhantomData<F>
+}
+type LeafH<F> = CRH<F>;
+impl<F:PrimeField + Absorb> Config for MerkleHashConfig<F> {
+    type Leaf = F;
+
+    type LeafHash = <LeafH<F>::Output;
+
+
+
+} 
 
 /// dummy for public params
 pub type PublicParameters = ();

@@ -70,9 +70,9 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
         let bz = matrix_vec_mul(&prover_key.b, &assignment.input, &assignment.witness);
         let cz = matrix_vec_mul(&prover_key.c, &assignment.input, &assignment.witness);
 
-        let aw = matrix_vec_mul(&prover_key.a, &acc_instance.z, &[]);
-        let bw = matrix_vec_mul(&prover_key.b, &acc_instance.z, &[]);
-        let cw = matrix_vec_mul(&prover_key.c, &acc_instance.z, &[]);
+        let aw = matrix_vec_mul(&prover_key.a, &acc_instance.w, &[]);
+        let bw = matrix_vec_mul(&prover_key.b, &acc_instance.w, &[]);
+        let cw = matrix_vec_mul(&prover_key.c, &acc_instance.w, &[]);
 
         let azbw = had_product(&az, &bw);
         let awbz = had_product(&aw, &bz);
@@ -182,7 +182,40 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
         decider_key: &'a Self::DeciderKey,
         accumulator: (&'a Self::AccumulatorInstance,&'a Self::AccumulatorWitness) 
     ) -> Result<bool,SynthesisError> {
-        Ok(false)
+        let (instance, witness) = accumulator;
+
+        let aw = matrix_vec_mul(&decider_key.a, &instance.w, &[]);
+        let bw = matrix_vec_mul(&decider_key.b, &instance.w, &[]);
+        let cw = matrix_vec_mul(&decider_key.c, &instance.w, &[]);
+
+        let mut w_modified: Vec<[F; 1]> = vec![];
+        for i in instance.w.iter() {
+            w_modified.push([i.clone()]);
+        }
+
+        let mut err_modified: Vec<[F; 1]> = vec![];
+        for i in instance.err.iter() {
+            err_modified.push([i.clone()]);
+        }
+
+        let hash_params = poseidon_parameters::<F>();
+
+        let w_tree =   
+        MerkleTree::<MerkleHashConfig<F>>::new(&hash_params, &hash_params, w_modified).unwrap();
+
+        let err_tree =   
+        MerkleTree::<MerkleHashConfig<F>>::new(&hash_params, &hash_params, err_modified).unwrap();
+
+        assert_eq!(w_tree.root(), witness.blinded_w);
+        assert_eq!(err_tree.root(), witness.blinded_err);
+
+        let lhs = had_product(&aw, &bw);
+        let rhs = add_vectors(
+            &instance.err, 
+            &scalar_mult(&instance.c, &cw)
+        );
+
+        Ok(lhs == rhs)
     }
 }
 

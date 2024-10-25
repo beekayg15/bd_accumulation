@@ -1,7 +1,6 @@
 use ark_crypto_primitives::sponge::poseidon::PoseidonConfig;
 use ark_ff::PrimeField;
-use ark_std::str::FromStr;
-use ark_std::{One, Zero};
+
 pub fn poseidon_parameters<F: PrimeField>() -> PoseidonConfig<F> {
     let full_rounds = 8;
     let partial_rounds = 29;

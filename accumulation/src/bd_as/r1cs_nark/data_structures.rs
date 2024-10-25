@@ -2,9 +2,9 @@ use std::marker::PhantomData;
 
 use ark_crypto_primitives::crh::poseidon::{TwoToOneCRH, CRH};
 use ark_crypto_primitives::crh::{CRHScheme, TwoToOneCRHScheme};
-use ark_crypto_primitives::merkle_tree::{Config, IdentityDigestConverter, MerkleTree};
+use ark_crypto_primitives::merkle_tree::{Config, IdentityDigestConverter};
 use ark_crypto_primitives::sponge::Absorb;
-use ark_ff::{Field, PrimeField};
+use ark_ff::PrimeField;
 use ark_relations::r1cs::Matrix;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::vec::Vec;
@@ -27,7 +27,7 @@ impl<F: PrimeField + Absorb> Config for MerkleHashConfig<F> {
 pub type PublicParameters = ();
 // for an IVC this is the proof for x_{i+1} = f(x_i)
 // a,b,c are r1cs constraint matrix for f
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, CanonicalDeserialize, CanonicalSerialize)]
 pub(crate) struct IndexInfo {
     pub(crate) num_constraints: usize,
     pub(crate) num_variables: usize,
@@ -36,7 +36,7 @@ pub(crate) struct IndexInfo {
 }
 
 /// Prover key r1cs constraint matrices such that a.x + b.x = c.x
-#[derive(Clone)]
+#[derive(Clone, CanonicalDeserialize, CanonicalSerialize)]
 pub struct IndexProverKey<F: PrimeField> {
     pub(crate) index_info: IndexInfo,
     pub(crate) a: Matrix<F>,
@@ -49,12 +49,12 @@ pub type IndexVerifierKey<G> = IndexProverKey<G>;
 
 /// an full assignment with input and witness
 #[derive(Clone, CanonicalDeserialize, CanonicalSerialize)]
-pub struct FullAssignment<F: Field> {
+pub struct FullAssignment<F: PrimeField> {
     pub(crate) input: Vec<F>,
     pub(crate) witness: Vec<F>,
 }
 
-impl<F: Field> FullAssignment<F> {
+impl<F: PrimeField> FullAssignment<F> {
     // pub(crate) fn zero(input_len: usize, witness_len: usize) -> Self {
     //     Self {
     //         input: vec![F::zero(); input_len],
@@ -76,14 +76,14 @@ impl<F: Field> FullAssignment<F> {
 //     }
 // }
 
-#[derive(Clone)]
 /// commitment to the full (input,witness) vec (Merkle root)
+#[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct CommitmentFullAssignment<F: PrimeField + Absorb> {
-    pub(crate) blinded_assignment: MerkleTree<MerkleHashConfig<F>>, // commitment to full assignment merkle root for tree
+    pub(crate) blinded_assignment: <TwoToOneCRH<F> as TwoToOneCRHScheme>::Output // commitment to full assignment merkle root for tree
                                                                     // with leaves = (input,witness)?
 }
 
-// impl<F: Field> CommitmentFullAssignment<F> {
+// impl<F: PrimeField> CommitmentFullAssignment<F> {
 //     // pub(crate) fn zero(witness_len: usize) -> Self {
 //     //     Self {
 //     //         blinded_assignment: vec![F::zero(); witness_len],

@@ -13,6 +13,7 @@ use ark_std::{cfg_into_iter, marker::PhantomData};
 mod data_structures;
 mod poseidon_config;
 pub use data_structures::*;
+pub use poseidon_config::*;
 
 type R1CSResult<T> = Result<T, SynthesisError>;
 pub(crate) const _CHALLENGE_SIZE: usize = 128;
@@ -110,11 +111,12 @@ impl<F: PrimeField + Absorb> R1CSNark<F> {
             inp_wit.push([i.clone()]);
         }
         let hash_params = poseidon_config::poseidon_parameters::<F>();
-        let blinded_witness =   // Replace with finding merkle root for (input||witness)
-        MerkleTree::<MerkleHashConfig<F>>::new(&hash_params, &hash_params, inp_wit).unwrap();
+
+        let witness_tree =   
+            MerkleTree::<MerkleHashConfig<F>>::new(&hash_params, &hash_params, inp_wit).unwrap();
 
         let commit_full_assgn = CommitmentFullAssignment {
-            blinded_assignment: blinded_witness,
+            blinded_assignment: witness_tree.root(),
         };
 
         let proof = Proof {
@@ -123,6 +125,7 @@ impl<F: PrimeField + Absorb> R1CSNark<F> {
         };
         Ok(proof)
     }
+    
     /// verifies a given proof and input using index verifier key
     pub fn verify(ivk: &IndexVerifierKey<F>, input: &[F], proof: &Proof<F>) -> bool {
         let a_times_input_witness = matrix_vec_mul(&ivk.a, &input, &proof.instance.witness);
@@ -191,7 +194,7 @@ pub(crate) fn matrix_vec_mul<F: Field>(matrix: &Matrix<F>, input: &[F], witness:
         .map(|row| inner_prod(row, input, witness))
         .collect()
 }
-/// hadamard product
+/// inner product b/w two vectors
 fn inner_prod<F: Field>(row: &[(F, usize)], input: &[F], witness: &[F]) -> F {
     let mut acc = F::zero();
     for &(ref coeff, i) in row {
@@ -204,4 +207,14 @@ fn inner_prod<F: Field>(row: &[(F, usize)], input: &[F], witness: &[F]) -> F {
         acc += &(if coeff.is_one() { tmp } else { tmp * coeff });
     }
     acc
+}
+
+/// hadamard product of two vectors
+pub(crate) fn hadamard_product<F: Field>(vec_a: &Vec<F>, vec_b: &Vec<F>) -> Vec<F> {
+    let had_prod = cfg_into_iter!(vec_a)
+            .zip(vec_b)
+            .map(|(a, b)| (*a) *  (*b))
+            .collect();
+    
+    had_prod
 }

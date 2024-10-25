@@ -13,12 +13,15 @@ pub trait AccumulationScheme<F: PrimeField> : Sized{
     type AccumulatorWitness:  Clone + CanonicalDeserialize + CanonicalSerialize;
     type InputInstance: Clone + CanonicalDeserialize + CanonicalSerialize;
     type InputWitness: Clone + CanonicalDeserialize + CanonicalSerialize;
+    type ProverKey: Clone + CanonicalDeserialize + CanonicalSerialize;
+    type VerifierKey: Clone + CanonicalDeserialize + CanonicalSerialize;
+    type DeciderKey: Clone + CanonicalDeserialize + CanonicalSerialize;
 
-    fn prove<'a>(old_accumulators: Vec<(&'a Self::AccumulatorInstance,&'a Self::AccumulatorWitness)>, input: (&'a Self::InputInstance,&'a Self::InputWitness) ) 
+    fn prove<'a>(prover_key: &'a Self::ProverKey, old_accumulators: (&'a Self::AccumulatorInstance,&'a Self::AccumulatorWitness), input: (&'a Self::InputInstance,&'a Self::InputWitness) ) 
     -> Result<((&'a Self::AccumulatorInstance, &'a Self::AccumulatorWitness),&'a Self::Proof),SynthesisError>;
 
-    fn verfy<'a> (proof: &Self::Proof, accumulated_proofs: (&'a Self::AccumulatorInstance,&'a Self::AccumulatorWitness )) -> Result<bool,SynthesisError>;
+    fn verify<'a> (verifier_key: &'a Self::VerifierKey, proof: &Self::Proof, accumulated_proofs: (&'a Self::AccumulatorInstance,&'a Self::AccumulatorWitness )) -> Result<bool,SynthesisError>;
 
-    fn decide<'a> (accumulator: (&'a Self::AccumulatorInstance,&'a Self::AccumulatorWitness) ) -> Result<bool,SynthesisError>;
+    fn decide<'a> (decider_key: &'a Self::DeciderKey, accumulator: (&'a Self::AccumulatorInstance,&'a Self::AccumulatorWitness) ) -> Result<bool,SynthesisError>;
 
 }

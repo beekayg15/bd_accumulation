@@ -4,7 +4,7 @@ use crate::bd_as::r1cs_nark::MerkleHashConfig;
 use crate::AccumulationScheme;
 use ark_crypto_primitives::merkle_tree::{MerkleTree, Path};
 use ark_crypto_primitives::sponge::Absorb;
-use ark_ff::{Field, PrimeField};
+use ark_ff::{BigInt, Field, PrimeField};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::cfg_into_iter;
 use ark_std::marker::PhantomData;
@@ -26,8 +26,14 @@ struct AccumulatorWitness<F: PrimeField + Absorb> {
 
 #[derive(Clone)]
 struct Proof<F: PrimeField + Absorb> {
-    opening_random_location: Vec<Path<MerkleHashConfig<F>>>,
+    acc_openings: Vec<Path<MerkleHashConfig<F>>>,
+    new_acc_openings: Vec<Path<MerkleHashConfig<F>>>,
+    input_openings: Vec<Path<MerkleHashConfig<F>>>,
+    err_openings: Vec<Path<MerkleHashConfig<F>>>,
+    new_err_openings: Vec<Path<MerkleHashConfig<F>>>,
+    t_openings: Vec<Path<MerkleHashConfig<F>>>,
     blinded_t: F,
+    t: Vec<F>,
 }
 #[derive(Clone)]
 struct BDASAccumulationScheme<F: PrimeField + Absorb> {
@@ -51,7 +57,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
     ) -> Result<((&'a Self::AccumulatorInstance, &'a Self::AccumulatorWitness),&'a Self::Proof),SynthesisError> {
         
         // Using Fiat-Shamir to compute randomness of the linear combination 
-        let r: F = None;
+        let r: F = F::from_bigint(BigInt::new(10)).unwrap();
 
         let (assignment, commitment) = input;
         let num_input_variables = assignment.input.len();
@@ -162,9 +168,22 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
             blinded_w: new_w_tree.root(),
         };
 
+        let acc_openings= vec![];
+        let new_acc_openings= vec![];
+        let input_openings= vec![];
+        let err_openings = vec![];
+        let new_err_openings = vec![];
+        let t_openings = vec![];
+
         let proof = Proof {
-            opening_random_location: vec![],
+            acc_openings: acc_openings,
+            new_acc_openings: new_acc_openings,
+            input_openings: input_openings,
+            err_openings: err_openings,
+            new_err_openings: new_err_openings,
+            t_openings: t_openings,
             blinded_t: blinded_t,
+            t: t,
         };
 
         Ok(((&new_acc_instance, &new_acc_witness), &proof))
@@ -173,9 +192,124 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
     fn verify<'a>(
         verifier_key: &'a Self::VerifierKey,
         proof: &Self::Proof, 
-        accumulated_proofs: (&'a Self::AccumulatorInstance,&'a Self::AccumulatorWitness)
+        old_accumulator: (&'a Self::AccumulatorInstance, &'a Self::AccumulatorWitness), 
+        new_accumulator: (&'a Self::AccumulatorInstance, &'a Self::AccumulatorWitness), 
+        input: (&'a Self::InputInstance, &'a Self::InputWitness),
     ) -> Result<bool,SynthesisError> {
-        Ok(false)
+        let input_openings = &proof.input_openings;
+        let acc_openings = &proof.input_openings;
+        let new_acc_openings = &proof.new_acc_openings;
+        let t_openings = &proof.t_openings;
+        let err_openings = &proof.err_openings;
+        let new_err_openings = &proof.new_err_openings;
+
+        if input_openings.len() != acc_openings.len() {
+            return Ok(false);
+        } else if input_openings.len() != new_acc_openings.len() {
+            return Ok(false);
+        }
+
+        let hash_params = poseidon_parameters::<F>();
+
+        let opening_indexes: Vec<usize> = vec![];
+
+        let (input_instance , input_witness) = input;
+        let (acc_instance , acc_witness) = old_accumulator;
+        let (new_acc_instance, new_acc_witness) = new_accumulator;
+        let t = &proof.t;
+
+        let mut counter = 0;
+        let mut input_assignment = input_instance.input.clone();
+        input_assignment.append(&mut input_instance.witness);
+
+        for &opening in input_openings {
+            if !opening.verify(
+                &hash_params, 
+                &hash_params, 
+                &input_witness.blinded_assignment, 
+                [input_assignment[counter]])? {
+                return Ok(false);
+            }
+            counter += 1;
+        }
+
+        counter = 0;
+        for &opening in acc_openings {
+            if !opening.verify(
+                &hash_params, 
+                &hash_params, 
+                &acc_witness.blinded_w, 
+                [acc_instance.w[counter]])? {
+                return Ok(false);
+            }
+            counter += 1;
+        }
+
+        counter = 0;
+        for &opening in new_acc_openings {
+            if !opening.verify(
+                &hash_params, 
+                &hash_params, 
+                &new_acc_witness.blinded_w, 
+                [new_acc_instance.w[counter]])? {
+                return Ok(false);
+            }
+            counter += 1;
+        }
+
+        counter = 0;
+        for &opening in t_openings {
+            if !opening.verify(
+                &hash_params, 
+                &hash_params, 
+                &proof.blinded_t, 
+                [t[counter]])? {
+                return Ok(false);
+            }
+            counter += 1;
+        }
+
+        counter = 0;
+        for &opening in err_openings {
+            if !opening.verify(
+                &hash_params, 
+                &hash_params, 
+                &acc_witness.blinded_err, 
+                [acc_instance.err[counter]])? {
+                return Ok(false);
+            }
+            counter += 1;
+        }
+
+        counter = 0;
+        for &opening in new_err_openings {
+            if !opening.verify(
+                &hash_params, 
+                &hash_params, 
+                &new_acc_witness.blinded_err, 
+                [new_acc_instance.err[counter]])? {
+                return Ok(false);
+            }
+            counter += 1;
+        }
+
+        let r: F = None;
+
+        if acc_instance.c + r != new_acc_instance.c {
+            return Ok(false);
+        }
+
+        for i in opening_indexes {
+            if new_acc_instance.w[i] != acc_instance.w[i] + r * input_assignment[i] {
+                return Ok(false);
+            }
+
+            if new_acc_instance.err[i] != acc_instance.err[i] + r * t[i] {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 
     fn decide<'a> (

@@ -1,10 +1,11 @@
 use std::marker::PhantomData;
+use std::usize;
 
 use ark_crypto_primitives::crh::poseidon::{TwoToOneCRH, CRH};
 use ark_crypto_primitives::crh::{CRHScheme, TwoToOneCRHScheme};
 use ark_crypto_primitives::merkle_tree::{Config, IdentityDigestConverter};
 use ark_crypto_primitives::sponge::Absorb;
-use ark_ff::PrimeField;
+use ark_ff::{One, PrimeField};
 use ark_relations::r1cs::Matrix;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::vec::Vec;
@@ -43,6 +44,28 @@ pub struct IndexProverKey<F: PrimeField> {
     pub(crate) b: Matrix<F>,
     pub(crate) c: Matrix<F>,
 }
+impl<F: PrimeField> IndexProverKey<F> {
+    pub fn get_default(index_info: IndexInfo) -> Self {
+        let n = index_info.num_variables + index_info.num_constraints;
+        let mut zer: Vec<(F, usize)> = vec![];
+        let mut def_m: Matrix<F> = vec![];
+        for _i in 0..n {
+            zer.push((F::ZERO, n));
+        }
+        for _i in 0..n {
+            def_m.push(zer.clone());
+        }
+        let a: Matrix<F> = def_m.clone();
+        let b: Matrix<F> = def_m.clone();
+        let c: Matrix<F> = def_m.clone();
+        IndexProverKey {
+            index_info,
+            a,
+            b,
+            c,
+        }
+    }
+}
 
 /// Verifier and prover key are same
 pub type IndexVerifierKey<G> = IndexProverKey<G>;
@@ -79,8 +102,8 @@ impl<F: PrimeField> FullAssignment<F> {
 /// commitment to the full (input,witness) vec (Merkle root)
 #[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct CommitmentFullAssignment<F: PrimeField + Absorb> {
-    pub(crate) blinded_assignment: <TwoToOneCRH<F> as TwoToOneCRHScheme>::Output // commitment to full assignment merkle root for tree
-                                                                    // with leaves = (input,witness)?
+    pub(crate) blinded_assignment: <TwoToOneCRH<F> as TwoToOneCRHScheme>::Output, // commitment to full assignment merkle root for tree
+                                                                                  // with leaves = (input,witness)?
 }
 
 // impl<F: PrimeField> CommitmentFullAssignment<F> {

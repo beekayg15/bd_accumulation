@@ -6,6 +6,8 @@ use ark_ff::Zero;
 use ark_r1cs_std::alloc::AllocVar;
 use ark_r1cs_std::eq::EqGadget;
 use ark_r1cs_std::fields::fp::FpVar;
+use ark_r1cs_std::uint16::UInt16;
+use ark_r1cs_std::R1CSVar;
 use ark_relations::r1cs::{
     ConstraintSynthesizer, ConstraintSystem, Matrix, OptimizationGoal, SynthesisError,
     SynthesisMode,
@@ -205,53 +207,74 @@ impl<F: PrimeField + Absorb> ConstraintSynthesizer<F> for VerifierCircuitForR1CS
         self,
         cs: ark_relations::r1cs::ConstraintSystemRef<F>,
     ) -> ark_relations::r1cs::Result<()> {
-        let mut inp: Vec<FpVar<F>> = vec![];
-        for fp_val in self.input.iter() {
-            inp.push(FpVar::new_input(ark_relations::ns!(cs, "inp_val"), || {
-                Ok(fp_val)
-            })?);
+        let mut inp_wit: Vec<(FpVar<F>, UInt16<F>)> = vec![];
+        for (ind, fp_val) in self.input.iter().enumerate() {
+            inp_wit.push((
+                FpVar::new_input(ark_relations::ns!(cs, "inp_val"), || Ok(fp_val))?,
+                UInt16::new_input(ark_relations::ns!(cs, "inp_val_ind"), || {
+                    Ok(u16::try_from(ind).unwrap())
+                })?,
+            ));
         }
-        let mut wit: Vec<FpVar<F>> = vec![];
-        for fp_val in self.proof.instance.witness.iter() {
-            wit.push(FpVar::new_witness(
-                ark_relations::ns!(cs, "witness"),
-                || Ok(fp_val),
-            )?);
+        let inp_size = self.input.len();
+        for (ind, fp_val) in self.proof.instance.witness.iter().enumerate() {
+            inp_wit.push((
+                FpVar::new_input(ark_relations::ns!(cs, "inp_val"), || Ok(fp_val))?,
+                UInt16::new_input(ark_relations::ns!(cs, "inp_val_ind"), || {
+                    Ok(u16::try_from(ind + inp_size).unwrap())
+                })?,
+            ));
         }
-        let mut a: Vec<Vec<FpVar<F>>> = vec![];
+        let mut a: Vec<Vec<(FpVar<F>, UInt16<F>)>> = vec![];
         for row in self.ivk.a.iter() {
-            let mut fp_row: Vec<FpVar<F>> = vec![];
+            let mut fp_row: Vec<(FpVar<F>, UInt16<F>)> = vec![];
             for val in row.iter() {
-                fp_row.push(FpVar::new_input(ark_relations::ns!(cs, "a"), || Ok(val.0))?);
+                fp_row.push((
+                    FpVar::new_input(ark_relations::ns!(cs, "a"), || Ok(val.0))?,
+                    UInt16::new_input(ark_relations::ns!(cs, "a_row_ind"), || {
+                        Ok(u16::try_from(val.1).unwrap())
+                    })?,
+                ));
             }
             a.push(fp_row);
         }
-        let mut b: Vec<Vec<FpVar<F>>> = vec![];
+        let mut b: Vec<Vec<(FpVar<F>, UInt16<F>)>> = vec![];
         for row in self.ivk.b.iter() {
-            let mut fp_row: Vec<FpVar<F>> = vec![];
+            let mut fp_row: Vec<(FpVar<F>, UInt16<F>)> = vec![];
             for val in row.iter() {
-                fp_row.push(FpVar::new_input(ark_relations::ns!(cs, "a"), || Ok(val.0))?);
+                fp_row.push((
+                    FpVar::new_input(ark_relations::ns!(cs, "b"), || Ok(val.0))?,
+                    UInt16::new_input(ark_relations::ns!(cs, "b_row_ind"), || {
+                        Ok(u16::try_from(val.1).unwrap())
+                    })?,
+                ));
             }
             b.push(fp_row);
         }
-        let mut c: Vec<Vec<FpVar<F>>> = vec![];
+        let mut c: Vec<Vec<(FpVar<F>, UInt16<F>)>> = vec![];
         for row in self.ivk.c.iter() {
-            let mut fp_row: Vec<FpVar<F>> = vec![];
+            let mut fp_row: Vec<(FpVar<F>, UInt16<F>)> = vec![];
             for val in row.iter() {
-                fp_row.push(FpVar::new_input(ark_relations::ns!(cs, "a"), || Ok(val.0))?);
+                fp_row.push((
+                    FpVar::new_input(ark_relations::ns!(cs, "c"), || Ok(val.0))?,
+                    UInt16::new_input(ark_relations::ns!(cs, "c_row_ind"), || {
+                        Ok(u16::try_from(val.1).unwrap())
+                    })?,
+                ));
             }
             c.push(fp_row);
         }
-        let mut inp_wit = inp;
-        inp_wit.extend(wit);
         let mut a_mul_inp_wit: Vec<FpVar<F>> = vec![];
         for row in a.iter() {
             let mut val = FpVar::new_constant(
                 ark_relations::ns!(cs, "val in a mul (inp,wit)"),
                 <F as Zero>::zero(),
             )?;
-            for (a_row_ele, inp_wit_ele) in row.iter().zip(inp_wit.iter()) {
-                val += a_row_ele.mul(inp_wit_ele);
+            for (a_row_val, ind) in row.iter() {
+                let ind_us: usize = ind.value()?.into();
+                let (inp_wit_val, inp_wit_ind) = &inp_wit[ind_us];
+                ind.enforce_equal(&inp_wit_ind)?;
+                val += a_row_val.mul(inp_wit_val);
             }
             a_mul_inp_wit.push(val);
         }
@@ -262,8 +285,11 @@ impl<F: PrimeField + Absorb> ConstraintSynthesizer<F> for VerifierCircuitForR1CS
                 ark_relations::ns!(cs, "val in a mul (inp,wit)"),
                 <F as Zero>::zero(),
             )?;
-            for (a_row_ele, inp_wit_ele) in row.iter().zip(inp_wit.iter()) {
-                val += a_row_ele.mul(inp_wit_ele);
+            for (b_row_val, ind) in row.iter() {
+                let ind_us: usize = ind.value()?.into();
+                let (inp_wit_val, inp_wit_ind) = &inp_wit[ind_us];
+                ind.enforce_equal(&inp_wit_ind)?;
+                val += b_row_val.mul(inp_wit_val);
             }
             b_mul_inp_wit.push(val);
         }
@@ -274,8 +300,11 @@ impl<F: PrimeField + Absorb> ConstraintSynthesizer<F> for VerifierCircuitForR1CS
                 ark_relations::ns!(cs, "val in a mul (inp,wit)"),
                 <F as Zero>::zero(),
             )?;
-            for (a_row_ele, inp_wit_ele) in row.iter().zip(inp_wit.iter()) {
-                val += a_row_ele.mul(inp_wit_ele);
+            for (c_row_val, ind) in row.iter() {
+                let ind_us: usize = ind.value()?.into();
+                let (inp_wit_val, inp_wit_ind) = &inp_wit[ind_us];
+                ind.enforce_equal(&inp_wit_ind)?;
+                val += c_row_val.mul(inp_wit_val);
             }
             c_mul_inp_wit.push(val);
         }
@@ -283,6 +312,8 @@ impl<F: PrimeField + Absorb> ConstraintSynthesizer<F> for VerifierCircuitForR1CS
         for (aiw_val, biw_val) in a_mul_inp_wit.iter().zip(b_mul_inp_wit.iter()) {
             had_prod_aiw_biw.push(aiw_val.mul(biw_val));
         }
+        println!("had_prod: {:?}", had_prod_aiw_biw.value()?);
+        println!("c inp wit: {:?}", c_mul_inp_wit.value()?);
         had_prod_aiw_biw.enforce_equal(&c_mul_inp_wit)?;
         Ok(())
     }
@@ -311,6 +342,7 @@ fn inner_prod<F: Field>(row: &[(F, usize)], input: &[F], witness: &[F]) -> F {
 #[cfg(test)]
 pub mod test {
     use core::panic;
+    use std::borrow::Borrow;
 
     use super::*;
     use ark_crypto_primitives::crh::{
@@ -350,6 +382,7 @@ pub mod test {
                 &inp_wit_1,
                 &inp_wit_2,
             )?;
+
             // let comp_hash =  <CRHGadget<Fr> as CRHSchemeGadget<_,_>>::evaluate(poseidon_hash_params, inp_wit )?;
             comp_hash.enforce_equal(&inp_hash)?;
             // println!("comp_hash: {:?}", comp_hash);
@@ -358,7 +391,6 @@ pub mod test {
     }
     #[test]
     pub fn test_r1cs_nark() {
-        let cs: ConstraintSystemRef<Fr> = ConstraintSystem::new_ref();
         let inp_wit_1: Fr = <Fr as Field>::from_random_bytes(&[0_u8]).unwrap() * <Fr as One>::one();
 
         let inp_wit_2: Fr = <Fr as Field>::from_random_bytes(&[1_u8]).unwrap() * <Fr as One>::one();
@@ -398,5 +430,56 @@ pub mod test {
         println!("PROOF GENERATED");
         let verified = R1CSNark::<Fr>::verify(&ivk, &[Fr::one(), inp_hash], &proof);
         assert_eq!(verified, true);
+    }
+
+    #[test]
+    pub fn test_nark_verifier() {
+        let inp_wit_1: Fr = <Fr as Field>::from_random_bytes(&[0_u8]).unwrap() * <Fr as One>::one();
+
+        let inp_wit_2: Fr = <Fr as Field>::from_random_bytes(&[1_u8]).unwrap() * <Fr as One>::one();
+
+        println!("inp_1: {:?}", inp_wit_1);
+        println!("inp_2: {:?}", inp_wit_2);
+        let inp_hash = <TwoToOneCRH<Fr> as TwoToOneCRHScheme>::evaluate(
+            &poseidon_parameters(),
+            inp_wit_1.clone(),
+            inp_wit_2.clone(),
+        )
+        .unwrap();
+        let hash_circ = HashVerifyCirc {
+            inp_wit_1,
+            inp_wit_2,
+            inp_hash,
+        };
+        // hash_circ.clone().generate_constraints(cs.clone()).unwrap();
+        // cs.finalize();
+        // let (input, witness, num_constraints) = {
+        //     let cs = cs.borrow().unwrap();
+        //     (
+        //         cs.instance_assignment.as_slice().to_vec(),
+        //         cs.witness_assignment.as_slice().to_vec(),
+        //         cs.num_constraints,
+        //     )
+        // };
+        let pp = R1CSNark::<Fr>::setup();
+
+        let Ok((ipk, ivk)) = R1CSNark::<Fr>::index(&pp, hash_circ.clone()) else {
+            panic!("prover key not generated")
+        };
+        let mut rng = ark_std::test_rng();
+        let Ok(proof) = R1CSNark::<Fr>::prove(&ipk, hash_circ, Some(&mut rng)) else {
+            panic!["proof not generated"]
+        };
+        let cs: ConstraintSystemRef<Fr> = ConstraintSystem::new_ref();
+        let verifier_cir = VerifierCircuitForR1CSNark {
+            ivk: ivk.clone(),
+            input: &[Fr::one(), inp_hash],
+            proof,
+        };
+        println!("c: {:?}", ivk.clone().c);
+        verifier_cir.generate_constraints(cs.clone()).unwrap();
+        cs.finalize();
+        let result = cs.is_satisfied().unwrap();
+        assert_eq!(result, true);
     }
 }

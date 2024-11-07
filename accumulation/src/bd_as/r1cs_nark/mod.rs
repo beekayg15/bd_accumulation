@@ -342,7 +342,7 @@ fn inner_prod<F: Field>(row: &[(F, usize)], input: &[F], witness: &[F]) -> F {
 #[cfg(test)]
 pub mod test {
     use core::panic;
-    use std::borrow::Borrow;
+    /// use std::borrow::Borrow;
 
     use super::*;
     use ark_crypto_primitives::crh::{

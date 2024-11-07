@@ -287,7 +287,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
     }
 
     fn verify<'a>(
-        // verifier_key: &'a Self::VerifierKey,
+        verifier_key: &'a Self::VerifierKey,
         proof: &Self::Proof,
         old_accumulator: (&'a Self::AccumulatorInstance, &'a Self::AccumulatorWitness),
         new_accumulator: (&'a Self::AccumulatorInstance, &'a Self::AccumulatorWitness),
@@ -307,8 +307,6 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
         }
 
         let hash_params = poseidon_parameters::<F>();
-
-        let opening_indexes: Vec<usize> = vec![];
 
         let (input_instance, input_witness) = input;
         let (acc_instance, acc_witness) = old_accumulator;
@@ -401,18 +399,54 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
             vec![old_accumulator.1.blinded_w],
         )[0];
 
+        let opening_indexes = get_random_indices(
+            16,
+            vec![input.1.blinded_assignment],
+            vec![old_accumulator.1.blinded_w],
+            verifier_key.index_info.num_variables
+        );
+
         if acc_instance.c + r != new_acc_instance.c {
             return Ok(false);
         }
 
+        let mut counter = 0;
+
         for i in opening_indexes {
+            if i != acc_openings[counter].leaf_index {
+                return Ok(false);
+            }
+
+            if i != new_acc_openings[counter].leaf_index {
+                return Ok(false);
+            }
+
+            if i != input_openings[counter].leaf_index {
+                return Ok(false);
+            }
+
             if new_acc_instance.w[i] != acc_instance.w[i] + r * input_assignment[i] {
+                return Ok(false);
+            }
+
+
+            if i != new_err_openings[counter].leaf_index {
+                return Ok(false);
+            }
+
+            if i != err_openings[counter].leaf_index {
+                return Ok(false);
+            }
+
+            if i != t_openings[counter].leaf_index {
                 return Ok(false);
             }
 
             if new_acc_instance.err[i] != acc_instance.err[i] + r * t[i] {
                 return Ok(false);
             }
+
+            counter += 1;
         }
 
         Ok(true)

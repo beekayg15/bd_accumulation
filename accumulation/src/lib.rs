@@ -24,7 +24,7 @@ pub trait AccumulationScheme<F: PrimeField> : Sized{
     ) -> Result<((Self::AccumulatorInstance, Self::AccumulatorWitness), Self::Proof), SynthesisError>;
 
     fn verify<'a> (
-        // verifier_key: &'a Self::VerifierKey,
+        verifier_key: &'a Self::VerifierKey,
         proof: &Self::Proof, 
         old_accumulator: (&'a Self::AccumulatorInstance, &'a Self::AccumulatorWitness), 
         new_accumulator: (&'a Self::AccumulatorInstance, &'a Self::AccumulatorWitness), 

@@ -523,3 +523,7 @@ fn scalar_mult<F: Field>(c: &F, vec_a: &Vec<F>) -> Vec<F> {
     result
 }
 
+#[cfg(test)]
+pub mod test {
+    
+}

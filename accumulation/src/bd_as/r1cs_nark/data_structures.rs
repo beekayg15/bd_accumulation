@@ -5,7 +5,7 @@ use ark_crypto_primitives::crh::poseidon::{TwoToOneCRH, CRH};
 use ark_crypto_primitives::crh::{CRHScheme, TwoToOneCRHScheme};
 use ark_crypto_primitives::merkle_tree::{Config, IdentityDigestConverter};
 use ark_crypto_primitives::sponge::Absorb;
-use ark_ff::{One, PrimeField};
+use ark_ff::PrimeField;
 use ark_relations::r1cs::Matrix;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::vec::Vec;

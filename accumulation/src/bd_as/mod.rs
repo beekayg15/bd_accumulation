@@ -1,60 +1,37 @@
 pub mod r1cs_nark;
 
-use crate::bd_as::r1cs_nark::MerkleHashConfig;
 use crate::AccumulationScheme;
-use ark_crypto_primitives::merkle_tree::{MerkleTree, Path};
+use ark_crypto_primitives::merkle_tree::MerkleTree;
 use ark_crypto_primitives::prf::blake2s::Blake2s;
 use ark_crypto_primitives::prf::PRF;
 use ark_crypto_primitives::sponge::Absorb;
 use ark_ff::{BigInteger, Field, PrimeField};
 use ark_relations::r1cs::SynthesisError;
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::cfg_into_iter;
 use ark_std::marker::PhantomData;
 use r1cs_nark::{
     matrix_vec_mul, poseidon_parameters, CommitmentFullAssignment, FullAssignment, IndexProverKey,
-    IndexVerifierKey,
+    IndexVerifierKey, MerkleHashConfig
 };
 
-#[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
-struct AccumulatorInstance<F: PrimeField> {
-    w: Vec<F>,
-    err: Vec<F>,
-    c: F,
-}
-#[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
-struct AccumulatorWitness<F: PrimeField + Absorb> {
-    blinded_w: F, //this is the root of a merkle tree for posiedon inner digest defined in
-    //MerkleHashConfig
-    blinded_err: F,
-}
+mod data_structures;
+pub use data_structures::*;
 
 #[derive(Clone)]
-struct Proof<F: PrimeField + Absorb> {
-    acc_openings: Vec<Path<MerkleHashConfig<F>>>,
-    new_acc_openings: Vec<Path<MerkleHashConfig<F>>>,
-    input_openings: Vec<Path<MerkleHashConfig<F>>>,
-    err_openings: Vec<Path<MerkleHashConfig<F>>>,
-    new_err_openings: Vec<Path<MerkleHashConfig<F>>>,
-    t_openings: Vec<Path<MerkleHashConfig<F>>>,
-    blinded_t: F,
-    t: Vec<F>,
-}
-#[derive(Clone)]
-struct BDASAccumulationScheme<F: PrimeField + Absorb> {
+pub struct BDASAccumulationScheme<F: PrimeField + Absorb> {
     _field_data: PhantomData<F>,
 }
+
 fn bytes_to_field_vec<F: PrimeField>(bytes: [u8; 32]) -> Vec<F> {
     let bits_per_elem = F::MODULUS_BIT_SIZE as usize;
     let bytes_per_elem = (bits_per_elem + 7) / 8; // Convert bits to bytes, rounding up
-    let mut result = Vec::new();
+    let mut result = vec![];
 
     // Iterate over chunks of the byte array and convert each chunk to a field element
     for chunk in bytes.chunks(bytes_per_elem) {
         // Convert the byte array to a BigInteger and then to a field element
-        if let Some(elem) = F::from_random_bytes(chunk) {
-            result.push(elem);
-        }
+        let elem = F::from_be_bytes_mod_order(chunk);
+        result.push(elem);
     }
 
     result
@@ -143,9 +120,12 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
             vec![old_accumulator.1.blinded_w],
         )[0];
 
-        let (assignment, commitment) = input;
-        let num_input_variables = assignment.input.len();
-        let num_witness_variables = assignment.witness.len();
+        let (input_instance, input_witness) = input;
+        let mut input_assignment = input_instance.input.clone();
+        input_assignment.extend(input_instance.witness.clone());
+
+        let num_input_variables = input_instance.input.len();
+        let num_witness_variables = input_instance.witness.len();
         let num_variables = num_witness_variables + num_input_variables;
 
         assert_eq!(prover_key.index_info.num_variables, num_variables);
@@ -156,43 +136,64 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
         assert_eq!(prover_key.index_info.num_variables, num_acc_variables);
         assert_eq!(prover_key.index_info.num_variables, acc_instance.err.len());
 
-        let az = matrix_vec_mul(&prover_key.a, &assignment.input, &assignment.witness);
-        let bz = matrix_vec_mul(&prover_key.b, &assignment.input, &assignment.witness);
-        let cz = matrix_vec_mul(&prover_key.c, &assignment.input, &assignment.witness);
+        let mut az = matrix_vec_mul(&prover_key.a, &input_instance.input, &input_instance.witness);
+        let mut bz = matrix_vec_mul(&prover_key.b, &input_instance.input, &input_instance.witness);
+        let mut cz = matrix_vec_mul(&prover_key.c, &input_instance.input, &input_instance.witness);
 
-        let aw = matrix_vec_mul(&prover_key.a, &acc_instance.w, &[]);
-        let bw = matrix_vec_mul(&prover_key.b, &acc_instance.w, &[]);
-        let cw = matrix_vec_mul(&prover_key.c, &acc_instance.w, &[]);
+        let mut aw = matrix_vec_mul(&prover_key.a, &acc_instance.w, &vec![]);
+        let mut bw = matrix_vec_mul(&prover_key.b, &acc_instance.w, &vec![]);
+        let mut cw = matrix_vec_mul(&prover_key.c, &acc_instance.w, &vec![]);
+
+        while az.len() < num_acc_variables  {
+            az.push(F::zero());
+            bz.push(F::zero());
+            cz.push(F::zero());
+            aw.push(F::zero());
+            bw.push(F::zero());
+            cw.push(F::zero());
+        }
 
         let azbw = had_product(&az, &bw);
         let awbz = had_product(&aw, &bz);
 
         let t = sub_vectors(
             &add_vectors(&azbw, &awbz),
-            &add_vectors(&cw, &scalar_mult(&r, &cz)),
+            &add_vectors(&cw, &scalar_mult(&acc_instance.c, &cz)),
         );
 
         let mut t_modified: Vec<[F; 1]> = vec![];
         for &i in t.iter() {
             t_modified.push([i.clone()]);
         }
+        while !t_modified.len().is_power_of_two() {
+            t_modified.push([F::zero()]);
+        }
 
         let mut w_modified: Vec<[F; 1]> = vec![];
         for &i in acc_instance.w.iter() {
             w_modified.push([i.clone()]);
         }
+        while !w_modified.len().is_power_of_two() {
+            w_modified.push([F::zero()]);
+        }
 
         let mut z_modified: Vec<[F; 1]> = vec![];
-        for &i in assignment.input.iter() {
+        for &i in input_instance.input.iter() {
             z_modified.push([i.clone()]);
         }
-        for &i in assignment.witness.iter() {
+        for &i in input_instance.witness.iter() {
             z_modified.push([i.clone()]);
+        }
+        while !z_modified.len().is_power_of_two() {
+            z_modified.push([F::zero()]);
         }
 
         let mut err_modified: Vec<[F; 1]> = vec![];
         for &i in acc_instance.err.iter() {
             err_modified.push([i.clone()]);
+        }
+        while !err_modified.len().is_power_of_two() {
+            err_modified.push([F::zero()]);
         }
 
         let hash_params = poseidon_parameters::<F>();
@@ -204,7 +205,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
             MerkleTree::<MerkleHashConfig<F>>::new(&hash_params, &hash_params, w_modified).unwrap();
 
         let z_tree =
-            MerkleTree::<MerkleHashConfig<F>>::new(&hash_params, &hash_params, z_modified).unwrap();
+            MerkleTree::<MerkleHashConfig<F>>::new(&hash_params, &hash_params, z_modified.clone()).unwrap();
 
         let err_tree =
             MerkleTree::<MerkleHashConfig<F>>::new(&hash_params, &hash_params, err_modified)
@@ -212,11 +213,11 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
 
         assert_eq!(err_tree.root(), acc_witness.blinded_err);
         assert_eq!(w_tree.root(), acc_witness.blinded_w);
-        assert_eq!(z_tree.root(), commitment.blinded_assignment);
+        assert_eq!(z_tree.root(), input_witness.blinded_assignment);
 
         let blinded_t = t_tree.root();
 
-        let new_w = add_vectors(&acc_instance.w, &scalar_mult(&r, &acc_instance.w));
+        let new_w = add_vectors(&acc_instance.w, &scalar_mult(&r, &input_assignment));
 
         let new_err = add_vectors(&acc_instance.err, &scalar_mult(&r, &t));
 
@@ -230,10 +231,16 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
         for &i in new_err.iter() {
             new_err_modified.push([i]);
         }
+        while !new_err_modified.len().is_power_of_two() {
+            new_err_modified.push([F::zero()]);
+        }
 
         let mut new_w_modified: Vec<[F; 1]> = vec![];
         for &i in new_w.iter() {
             new_w_modified.push([i.clone()]);
+        }
+        while !new_w_modified.len().is_power_of_two() {
+            new_w_modified.push([F::zero()]);
         }
 
         let new_w_tree =
@@ -317,12 +324,19 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
         let mut input_assignment = input_instance.input.clone();
         input_assignment.extend(input_instance.witness.clone());
 
+        let opening_indexes = get_random_indices(
+            16,
+            vec![input.1.blinded_assignment],
+            vec![old_accumulator.1.blinded_w],
+            verifier_key.index_info.num_variables
+        );
+
         for opening in input_openings {
             if !opening.verify(
                 &hash_params,
                 &hash_params,
                 &input_witness.blinded_assignment,
-                [input_assignment[counter]],
+                [input_assignment[opening_indexes[counter]]],
             ).unwrap() {
                 return Ok(false);
             }
@@ -335,7 +349,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
                 &hash_params,
                 &hash_params,
                 &acc_witness.blinded_w,
-                [acc_instance.w[counter]],
+                [acc_instance.w[opening_indexes[counter]]],
             ).unwrap() {
                 return Ok(false);
             }
@@ -348,7 +362,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
                 &hash_params,
                 &hash_params,
                 &new_acc_witness.blinded_w,
-                [new_acc_instance.w[counter]],
+                [new_acc_instance.w[opening_indexes[counter]]],
             ).unwrap() {
                 return Ok(false);
             }
@@ -361,7 +375,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
                 &hash_params, 
                 &hash_params, 
                 &proof.blinded_t, 
-                [t[counter]]
+                [t[opening_indexes[counter]]]
             ).unwrap() {
                 return Ok(false);
             }
@@ -374,7 +388,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
                 &hash_params,
                 &hash_params,
                 &acc_witness.blinded_err,
-                [acc_instance.err[counter]],
+                [acc_instance.err[opening_indexes[counter]]],
             ).unwrap() {
                 return Ok(false);
             }
@@ -387,7 +401,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
                 &hash_params,
                 &hash_params,
                 &new_acc_witness.blinded_err,
-                [new_acc_instance.err[counter]],
+                [new_acc_instance.err[opening_indexes[counter]]],
             ).unwrap() {
                 return Ok(false);
             }
@@ -399,54 +413,18 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
             vec![old_accumulator.1.blinded_w],
         )[0];
 
-        let opening_indexes = get_random_indices(
-            16,
-            vec![input.1.blinded_assignment],
-            vec![old_accumulator.1.blinded_w],
-            verifier_key.index_info.num_variables
-        );
-
         if acc_instance.c + r != new_acc_instance.c {
             return Ok(false);
         }
 
-        let mut counter = 0;
-
         for i in opening_indexes {
-            if i != acc_openings[counter].leaf_index {
-                return Ok(false);
-            }
-
-            if i != new_acc_openings[counter].leaf_index {
-                return Ok(false);
-            }
-
-            if i != input_openings[counter].leaf_index {
-                return Ok(false);
-            }
-
             if new_acc_instance.w[i] != acc_instance.w[i] + r * input_assignment[i] {
-                return Ok(false);
-            }
-
-
-            if i != new_err_openings[counter].leaf_index {
-                return Ok(false);
-            }
-
-            if i != err_openings[counter].leaf_index {
-                return Ok(false);
-            }
-
-            if i != t_openings[counter].leaf_index {
                 return Ok(false);
             }
 
             if new_acc_instance.err[i] != acc_instance.err[i] + r * t[i] {
                 return Ok(false);
             }
-
-            counter += 1;
         }
 
         Ok(true)
@@ -458,18 +436,30 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
     ) -> Result<bool, SynthesisError> {
         let (instance, witness) = accumulator;
 
-        let aw = matrix_vec_mul(&decider_key.a, &instance.w, &[]);
-        let bw = matrix_vec_mul(&decider_key.b, &instance.w, &[]);
-        let cw = matrix_vec_mul(&decider_key.c, &instance.w, &[]);
+        let mut aw = matrix_vec_mul(&decider_key.a, &instance.w, &vec![]);
+        let mut bw = matrix_vec_mul(&decider_key.b, &instance.w, &vec![]);
+        let mut cw = matrix_vec_mul(&decider_key.c, &instance.w, &vec![]);
+
+        while aw.len() < decider_key.index_info.num_variables {
+            aw.push(F::zero());
+            bw.push(F::zero());
+            cw.push(F::zero());
+        }
 
         let mut w_modified: Vec<[F; 1]> = vec![];
         for i in instance.w.iter() {
             w_modified.push([i.clone()]);
         }
+        while !w_modified.len().is_power_of_two() {
+            w_modified.push([F::zero()]);
+        }
 
         let mut err_modified: Vec<[F; 1]> = vec![];
         for i in instance.err.iter() {
             err_modified.push([i.clone()]);
+        }
+        while !err_modified.len().is_power_of_two() {
+            err_modified.push([F::zero()]);
         }
 
         let hash_params = poseidon_parameters::<F>();
@@ -485,9 +475,13 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
         assert_eq!(err_tree.root(), witness.blinded_err);
 
         let lhs = had_product(&aw, &bw);
-        let rhs = add_vectors(&instance.err, &scalar_mult(&instance.c, &cw));
 
-        Ok(lhs == rhs)
+        let rhs = add_vectors(&instance.err, &scalar_mult(&instance.c, &cw));
+        
+        if lhs == rhs {
+            return Ok(true)
+        }
+        Ok(false)
     }
 }
 
@@ -519,11 +513,162 @@ fn had_product<F: Field>(vec_a: &Vec<F>, vec_b: &Vec<F>) -> Vec<F> {
 }
 
 fn scalar_mult<F: Field>(c: &F, vec_a: &Vec<F>) -> Vec<F> {
-    let result = cfg_into_iter!(vec_a).map(|a| (*a) * (*c)).collect();
+    let result: Vec<F> = cfg_into_iter!(vec_a).map(|a| (*a) * (*c)).collect();
     result
 }
 
 #[cfg(test)]
 pub mod test {
-    
+    use core::panic;
+    use super::*;
+    use ark_crypto_primitives::crh::{
+        poseidon::{
+            constraints::{CRHParametersVar, TwoToOneCRHGadget},
+            TwoToOneCRH,
+        },
+        TwoToOneCRHScheme, TwoToOneCRHSchemeGadget,
+    };
+    use ark_relations::r1cs::ConstraintSynthesizer;
+    use ark_ed_on_bls12_381::Fr;
+    use ark_ff::One;
+    use ark_r1cs_std::{alloc::AllocVar, eq::EqGadget, fields::fp::FpVar};
+    use r1cs_nark::{
+        poseidon_parameters, R1CSNark
+    };
+    #[derive(Clone)]
+    pub struct HashVerifyCirc {
+        inp_wit_1: Fr,
+        inp_wit_2: Fr,
+        inp_hash: Fr,
+    }
+    impl ConstraintSynthesizer<Fr> for HashVerifyCirc {
+        fn generate_constraints(
+            self,
+            cs: ark_relations::r1cs::ConstraintSystemRef<Fr>,
+        ) -> ark_relations::r1cs::Result<()> {
+            let poseidon_hash_params = <CRHParametersVar<_> as AllocVar<_, _>>::new_constant(
+                ark_relations::ns!(cs, "poseidon_hash_params"),
+                poseidon_parameters(),
+            )?;
+            let inp_hash =
+                FpVar::new_input(ark_relations::ns!(cs, "inp_hash"), || Ok(self.inp_hash))?;
+            let inp_wit_1 =
+                FpVar::new_witness(ark_relations::ns!(cs, "inp_wit_1"), || Ok(self.inp_wit_1))?;
+            let inp_wit_2 =
+                FpVar::new_witness(ark_relations::ns!(cs, "inp_wit_2"), || Ok(self.inp_wit_2))?;
+            let comp_hash = <TwoToOneCRHGadget<Fr> as TwoToOneCRHSchemeGadget<_, _>>::evaluate(
+                &poseidon_hash_params,
+                &inp_wit_1,
+                &inp_wit_2,
+            )?;
+
+            // let comp_hash =  <CRHGadget<Fr> as CRHSchemeGadget<_,_>>::evaluate(poseidon_hash_params, inp_wit )?;
+            comp_hash.enforce_equal(&inp_hash)?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    pub fn test_null_accumulator() {
+        let inp_wit_1: Fr = <Fr as Field>::from_random_bytes(&[0_u8]).unwrap() * <Fr as One>::one();
+
+        let inp_wit_2: Fr = <Fr as Field>::from_random_bytes(&[1_u8]).unwrap() * <Fr as One>::one();
+
+        println!("inp_1: {:?}", inp_wit_1);
+        println!("inp_2: {:?}", inp_wit_2);
+        let inp_hash = <TwoToOneCRH<Fr> as TwoToOneCRHScheme>::evaluate(
+            &poseidon_parameters(),
+            inp_wit_1.clone(),
+            inp_wit_2.clone(),
+        )
+        .unwrap();
+        let hash_circ = HashVerifyCirc {
+            inp_wit_1,
+            inp_wit_2,
+            inp_hash,
+        };
+        let pp = R1CSNark::<Fr>::setup();
+
+        let Ok((ipk, ivk)) = R1CSNark::<Fr>::index(&pp, hash_circ.clone()) else {
+            panic!("prover key not generated")
+        };
+
+        let null_acc_instance = AccumulatorInstance::<Fr>::zero(ipk.clone());
+        let null_acc_witness = AccumulatorWitness::<Fr>::zero(ipk.clone());
+
+        let null_accumulator_succeeded = BDASAccumulationScheme::decide(
+            &ivk, 
+            (&null_acc_instance, &null_acc_witness)
+        ).unwrap();
+
+        assert_eq!(null_accumulator_succeeded, true);
+    }
+
+    #[test]
+    pub fn test_folding_single_proof() {
+        let inp_wit_1: Fr = <Fr as Field>::from_random_bytes(&[0_u8]).unwrap() * <Fr as One>::one();
+        let inp_wit_2: Fr = <Fr as Field>::from_random_bytes(&[1_u8]).unwrap() * <Fr as One>::one();
+
+        println!("inp_1: {:?}", inp_wit_1);
+        println!("inp_2: {:?}", inp_wit_2);
+        let inp_hash = <TwoToOneCRH<Fr> as TwoToOneCRHScheme>::evaluate(
+            &poseidon_parameters(),
+            inp_wit_1.clone(),
+            inp_wit_2.clone(),
+        )
+        .unwrap();
+        let hash_circ = HashVerifyCirc {
+            inp_wit_1,
+            inp_wit_2,
+            inp_hash,
+        };
+        let pp = R1CSNark::<Fr>::setup();
+
+        let Ok((ipk, ivk)) = R1CSNark::<Fr>::index(&pp, hash_circ.clone()) else {
+            panic!("prover key not generated")
+        };
+
+        let null_acc_instance = AccumulatorInstance::<Fr>::zero(ipk.clone());
+        let null_acc_witness = AccumulatorWitness::<Fr>::zero(ipk.clone());
+
+        let mut rng = ark_std::test_rng();
+        let Ok(proof) = R1CSNark::<Fr>::prove(&ipk, hash_circ, Some(&mut rng)) else {
+            panic!["proof not generated"]
+        };
+
+        if !R1CSNark::<Fr>::verify(
+            &ivk, 
+            &proof.instance.input, 
+            &proof
+        ) {
+            panic!["R1CS proof not verified"];
+        }
+
+        let Ok(((new_acc_instance, new_acc_witness), acc_proof)) = BDASAccumulationScheme::<Fr>::prove(
+            &ipk,
+            (&null_acc_instance, &null_acc_witness),
+            (&proof.instance, &proof.witness)
+        ) else {
+            panic!["accumulation proof not generated"]
+        };
+
+        let verification_result = BDASAccumulationScheme::<Fr>::verify(
+            &ivk, 
+            &acc_proof,
+            (&null_acc_instance, &null_acc_witness), 
+            (&new_acc_instance, &new_acc_witness), 
+            (&proof.instance, &proof.witness)
+        ).unwrap();
+
+        if !verification_result {
+            panic!["not able to verify accumulated proof"];
+        }
+
+        let decider_succeeded = BDASAccumulationScheme::decide(
+            &ivk, 
+            (&new_acc_instance, &new_acc_witness)
+        ).unwrap();
+
+        assert_eq!(decider_succeeded, true);
+    }
 }

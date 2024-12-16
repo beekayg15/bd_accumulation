@@ -4,21 +4,23 @@ use ark_crypto_primitives::{merkle_tree::MerkleTree, sponge::Absorb};
 use ark_ff::{BigInt, PrimeField};
 use ark_ff::{BigInteger, BigInteger256};
 use ark_poly::Polynomial;
+use ark_std::iterable::Iterable;
 use reed_solomon::RSCode;
 use std::usize;
 pub mod reed_solomon;
 use crate::bd_as::r1cs_nark::{poseidon_parameters, MerkleHashConfig};
-struct RSProver<'a, F: PrimeField> {
-    code1: &'a RSCode<F>,
-    code2: &'a RSCode<F>,
+struct RSProver<F: PrimeField> {
+    code1: RSCode<F>,
+    code2: RSCode<F>,
     s: u16, //out ofdomain parameter
     t: u16, // indomain parameter
 }
 struct RSProof<F: PrimeField> {
-    cm_code1: F,
-    cm_code2: F,
+    combined_codes_root: F,
+    out_of_domain_evals: Vec<(F, F)>,
+    in_domain_fill: Vec<(F, F)>,
 }
-pub fn generate_random_linear_combinator<F>(code1: &[Vec<F>], code2: &[Vec<F>]) -> Result<F>
+pub fn generate_random_linear_combinator<F>(code1: &Vec<[F; 2]>, code2: &Vec<[F; 2]>) -> Result<F>
 where
     F: PrimeField<BigInt = BigInteger256>,
 {
@@ -109,19 +111,23 @@ pub fn get_indices<F: PrimeField<BigInt = BigInteger256>>(
     }
     r
 }
-impl<F: PrimeField<BigInt = BigInteger256> + Absorb> RSProver<'_, F> {
+impl<F: PrimeField<BigInt = BigInteger256> + Absorb> RSProver<F> {
     pub fn prove(self) -> Result<RSProof<F>> {
-        let r = generate_random_linear_combinator(&self.code1.code, &self.code2.code)?;
+        let r = generate_random_linear_combinator(
+            &self.code1.clone().get_commit_vector(),
+            &self.code2.clone().get_commit_vector(),
+        )?;
+
         let merkle_tree_code1 = MerkleTree::<MerkleHashConfig<F>>::new(
             &poseidon_parameters(),
             &poseidon_parameters(),
-            self.code1.code.to_vec(),
+            self.code1.clone().get_commit_vector(),
         )
         .unwrap();
         let merkle_tree_code2 = MerkleTree::<MerkleHashConfig<F>>::new(
             &poseidon_parameters(),
             &poseidon_parameters(),
-            self.code2.code.to_vec(),
+            self.code2.clone().get_commit_vector(),
         )
         .unwrap();
         let mut random_linear_combination: Vec<F> = vec![];
@@ -140,7 +146,7 @@ impl<F: PrimeField<BigInt = BigInteger256> + Absorb> RSProver<'_, F> {
         let merkle_tree_combined = MerkleTree::<MerkleHashConfig<F>>::new(
             &poseidon_parameters(),
             &poseidon_parameters(),
-            rand_linear_code.code,
+            rand_linear_code.clone().get_commit_vector(),
         )
         .unwrap();
         let m1_tree_root: F = merkle_tree_code1.root();
@@ -165,6 +171,21 @@ impl<F: PrimeField<BigInt = BigInteger256> + Absorb> RSProver<'_, F> {
             self.t.into(),
             sz,
         );
-        todo!()
+        let mut s: Vec<F> = vec![];
+        let mut ans: Vec<F> = vec![];
+        for (x, y) in out_domain_evals.iter() {
+            s.push(x.clone());
+            ans.push(y.clone());
+        }
+        for ind in r_indices.iter() {
+            s.push(rand_linear_code.evaluation_domain[*ind]);
+        }
+        let fill = rand_linear_code.poly_quotient(s)?;
+        let proof = RSProof {
+            combined_codes_root: mcomb_tree_root,
+            out_of_domain_evals: out_domain_evals,
+            in_domain_fill: fill,
+        };
+        Ok(proof)
     }
 }

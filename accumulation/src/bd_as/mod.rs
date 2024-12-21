@@ -14,8 +14,11 @@ use r1cs_nark::{
     IndexVerifierKey, MerkleHashConfig
 };
 
+
 mod data_structures;
 pub use data_structures::*;
+mod reed_solomon;
+pub use reed_solomon::*;
 
 #[derive(Clone)]
 pub struct BDASAccumulationScheme<F: PrimeField + Absorb> {
@@ -161,35 +164,40 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
             &add_vectors(&cw, &scalar_mult(&acc_instance.c, &cz)),
         );
 
+        let t_code = RSCode::encode(t.clone(), 512).code;
+
         let mut t_modified: Vec<[F; 1]> = vec![];
-        for &i in t.iter() {
+        for &i in t_code.iter() {
             t_modified.push([i.clone()]);
         }
         while !t_modified.len().is_power_of_two() {
             t_modified.push([F::zero()]);
         }
 
+        let w_code = RSCode::encode(acc_instance.w.clone(), 512).code;
+
         let mut w_modified: Vec<[F; 1]> = vec![];
-        for &i in acc_instance.w.iter() {
+        for &i in w_code.iter() {
             w_modified.push([i.clone()]);
         }
         while !w_modified.len().is_power_of_two() {
             w_modified.push([F::zero()]);
         }
 
+        let z_code = RSCode::encode(input_assignment.clone(), 512).code;
+
         let mut z_modified: Vec<[F; 1]> = vec![];
-        for &i in input_instance.input.iter() {
-            z_modified.push([i.clone()]);
-        }
-        for &i in input_instance.witness.iter() {
+        for &i in z_code.iter() {
             z_modified.push([i.clone()]);
         }
         while !z_modified.len().is_power_of_two() {
             z_modified.push([F::zero()]);
         }
 
+        let err_code = RSCode::encode(acc_instance.err.clone(), 512).code;
+
         let mut err_modified: Vec<[F; 1]> = vec![];
-        for &i in acc_instance.err.iter() {
+        for &i in err_code.iter() {
             err_modified.push([i.clone()]);
         }
         while !err_modified.len().is_power_of_two() {
@@ -227,16 +235,20 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
             c: acc_instance.c + r,
         };
 
+        let new_err_code = RSCode::encode(new_err.clone(), 512).code;
+
         let mut new_err_modified: Vec<[F; 1]> = vec![];
-        for &i in new_err.iter() {
+        for &i in new_err_code.iter() {
             new_err_modified.push([i]);
         }
         while !new_err_modified.len().is_power_of_two() {
             new_err_modified.push([F::zero()]);
         }
 
+        let new_w_code = RSCode::encode(new_w.clone(), 512).code;
+
         let mut new_w_modified: Vec<[F; 1]> = vec![];
-        for &i in new_w.iter() {
+        for &i in new_w_code.iter() {
             new_w_modified.push([i.clone()]);
         }
         while !new_w_modified.len().is_power_of_two() {
@@ -267,7 +279,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
             16, 
             vec![input.1.blinded_assignment],
             vec![old_accumulator.1.blinded_w],
-            num_variables
+            512
         );
 
         for i in _indices {
@@ -324,11 +336,18 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
         let mut input_assignment = input_instance.input.clone();
         input_assignment.extend(input_instance.witness.clone());
 
+        let new_w_code = RSCode::encode(new_acc_instance.w.clone(), 512).code;
+        let new_err_code = RSCode::encode(new_acc_instance.err.clone(), 512).code;
+        let err_code = RSCode::encode(acc_instance.err.clone(), 512).code;
+        let z_code = RSCode::encode(input_assignment.clone(), 512).code;
+        let w_code = RSCode::encode(acc_instance.w.clone(), 512).code;
+        let t_code = RSCode::encode(t.clone(), 512).code;
+
         let opening_indexes = get_random_indices(
             16,
             vec![input.1.blinded_assignment],
             vec![old_accumulator.1.blinded_w],
-            verifier_key.index_info.num_variables
+            512
         );
 
         for opening in input_openings {
@@ -336,7 +355,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
                 &hash_params,
                 &hash_params,
                 &input_witness.blinded_assignment,
-                [input_assignment[opening_indexes[counter]]],
+                [z_code[opening_indexes[counter]]],
             ).unwrap() {
                 return Ok(false);
             }
@@ -349,7 +368,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
                 &hash_params,
                 &hash_params,
                 &acc_witness.blinded_w,
-                [acc_instance.w[opening_indexes[counter]]],
+                [w_code[opening_indexes[counter]]],
             ).unwrap() {
                 return Ok(false);
             }
@@ -362,7 +381,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
                 &hash_params,
                 &hash_params,
                 &new_acc_witness.blinded_w,
-                [new_acc_instance.w[opening_indexes[counter]]],
+                [new_w_code[opening_indexes[counter]]],
             ).unwrap() {
                 return Ok(false);
             }
@@ -375,7 +394,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
                 &hash_params, 
                 &hash_params, 
                 &proof.blinded_t, 
-                [t[opening_indexes[counter]]]
+                [t_code[opening_indexes[counter]]]
             ).unwrap() {
                 return Ok(false);
             }
@@ -388,7 +407,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
                 &hash_params,
                 &hash_params,
                 &acc_witness.blinded_err,
-                [acc_instance.err[opening_indexes[counter]]],
+                [err_code[opening_indexes[counter]]],
             ).unwrap() {
                 return Ok(false);
             }
@@ -401,7 +420,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
                 &hash_params,
                 &hash_params,
                 &new_acc_witness.blinded_err,
-                [new_acc_instance.err[opening_indexes[counter]]],
+                [new_err_code[opening_indexes[counter]]],
             ).unwrap() {
                 return Ok(false);
             }
@@ -418,11 +437,11 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
         }
 
         for i in opening_indexes {
-            if new_acc_instance.w[i] != acc_instance.w[i] + r * input_assignment[i] {
+            if new_w_code[i] != w_code[i] + r * z_code[i] {
                 return Ok(false);
             }
 
-            if new_acc_instance.err[i] != acc_instance.err[i] + r * t[i] {
+            if new_err_code[i] != err_code[i] + r * t_code[i] {
                 return Ok(false);
             }
         }
@@ -446,8 +465,11 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
             cw.push(F::zero());
         }
 
+        let w_code = RSCode::encode(instance.w.clone(), 512).code;
+        let err_code = RSCode::encode(instance.err.clone(), 512).code;
+
         let mut w_modified: Vec<[F; 1]> = vec![];
-        for i in instance.w.iter() {
+        for i in w_code.iter() {
             w_modified.push([i.clone()]);
         }
         while !w_modified.len().is_power_of_two() {
@@ -455,7 +477,7 @@ impl<F: PrimeField + Absorb> AccumulationScheme<F> for BDASAccumulationScheme<F>
         }
 
         let mut err_modified: Vec<[F; 1]> = vec![];
-        for i in instance.err.iter() {
+        for i in err_code.iter() {
             err_modified.push([i.clone()]);
         }
         while !err_modified.len().is_power_of_two() {

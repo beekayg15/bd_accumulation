@@ -32,7 +32,7 @@ impl<F: PrimeField + Absorb> AccumulatorWitness<F> {
     pub(crate) fn zero(ipk: IndexProverKey<F>) -> Self {
         let hash_params = poseidon_parameters::<F>();
 
-        let mut zero_mod = vec![[F::zero()]; ipk.index_info.num_variables];
+        let mut zero_mod = vec![[F::zero()]; 512];
         while !zero_mod.len().is_power_of_two() {
             zero_mod.push([F::zero()]);
         }

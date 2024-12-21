@@ -16,6 +16,7 @@ use ark_std::ops::Mul;
 use ark_std::rand::RngCore;
 use ark_std::vec::Vec;
 use ark_std::{cfg_into_iter, marker::PhantomData};
+use crate::bd_as::RSCode;
 
 mod data_structures;
 mod poseidon_config;
@@ -110,11 +111,14 @@ impl<F: PrimeField + Absorb> R1CSNark<F> {
             input: input.clone(),
             witness: witness.clone(),
         };
+
+        let mut assignment = input.clone();
+        assignment.extend(witness.clone());
+
+        let inp_code = RSCode::encode(assignment, 512).code;
+
         let mut inp_wit: Vec<[F; 1]> = vec![];
-        for i in input.iter() {
-            inp_wit.push([i.clone()]);
-        }
-        for i in witness.iter() {
+        for i in inp_code.iter() {
             inp_wit.push([i.clone()]);
         }
         while !inp_wit.len().is_power_of_two() {

@@ -1,1 +1,0 @@
-(bd_as::data_structures::AccumulatorInstance<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>, bd_as::data_structures::AccumulatorWitness<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>)

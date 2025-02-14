@@ -1,1 +1,0 @@
-(&bd_as::r1cs_nark::data_structures::FullAssignment<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>, &bd_as::r1cs_nark::data_structures::CommitmentFullAssignment<ark_ff::Fp<MontBackend<FrConfig, 4>, 4>>)

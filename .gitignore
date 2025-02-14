@@ -1,1 +1,3 @@
 accumulation/target/*
+/target
+.DS_Store

@@ -51,7 +51,7 @@ The original paper:
 This implementation:
 
 ```bibtex
-@software{rust_kvac_impl,
+@software{rust_bd_accumulation_impl,
     author = {Barath GaneshKumar},
     title = {Rust Implementation of Accumulation without Homomorphism},
     year = {2025},

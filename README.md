@@ -52,7 +52,7 @@ This implementation:
 
 ```bibtex
 @software{rust_bd_accumulation_impl,
-    author = {Barath GaneshKumar},
+    authors = {Barath Kumar GaneshKumar, Utkarsh Parkhi},
     title = {Rust Implementation of Accumulation without Homomorphism},
     year = {2025},
     url = {github.com/beekayg15/bd_accumulation},

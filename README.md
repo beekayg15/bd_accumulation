@@ -8,6 +8,8 @@ Accumulation schemes are primarily used in incrementally verifiable computations
 
 The implementation provided here, overcomes the issue by replacing the homomorphism check with a two process: *linear encodings* and *merkle-tree spot checking*.
 
+The implementation of 'ARC: Accumulation for Reed-Solomon Codes' as be found [here](https://github.com/beekayg15/arc_accumulation)
+
 ## License
 
 MIT License
